@@ -1,7 +1,7 @@
 import os
 from google.adk.agents import Agent, ParallelAgent, LoopAgent, SequentialAgent
 from google.adk.models.google_llm import Gemini
-from google.adk.runners import InMemoryRunner
+from google.adk.runners import Runner, InMemoryRunner
 from google.adk.tools import google_search, FunctionTool, AgentTool
 from google.genai import types
 from urllib.parse import urlencode
@@ -12,6 +12,7 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
     StdioConnectionParams,
     StreamableHTTPServerParams,
 )
+from google.adk.sessions import DatabaseSessionService
 from mcp import StdioServerParameters
 
 retry_config = types.HttpRetryOptions(
@@ -55,8 +56,25 @@ async def run():
             output_key="final_response",
         )
 
-        # Initialize runner with the agent and explicit app_name
-        runner = InMemoryRunner(agent=root_agent, app_name="financial_assistant")
+        db_url = "postgresql://postgres@localhost:5432/agent_state"  # Local PostgreSQL database
+        session_service = DatabaseSessionService(db_url=db_url)
+
+        # Initialize runner with the agent and database session service
+        runner = Runner(
+            agent=root_agent,
+            app_name="financial_assistant",
+            session_service=session_service
+        )
+
+        # Delete existing session if it exists, then create fresh session
+        try:
+            await runner.session_service.delete_session(
+                app_name=runner.app_name,
+                user_id=user_id,
+                session_id=session_id,
+            )
+        except:
+            pass  # Session doesn't exist, continue
 
         await runner.session_service.create_session(
             app_name=runner.app_name,

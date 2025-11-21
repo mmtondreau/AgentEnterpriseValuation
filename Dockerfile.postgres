@@ -1,0 +1,12 @@
+FROM postgres:16-alpine
+
+# Set environment variables for PostgreSQL
+ENV POSTGRES_HOST_AUTH_METHOD=trust
+ENV POSTGRES_DB=agent_state
+ENV POSTGRES_USER=postgres
+
+# Expose PostgreSQL port
+EXPOSE 5432
+
+# The init-db.sql will be mounted via docker-compose volume
+# No need to COPY it here since it's handled by the volume mount

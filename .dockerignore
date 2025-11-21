@@ -1,0 +1,48 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments (not needed in containers)
+.Python
+env/
+venv/
+ENV/
+.venv
+.poetry/
+
+# Environment files (secrets passed at runtime)
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+
+# Documentation
+*.md
+docs/
+
+# Test files
+tests/
+*.pytest_cache/
+
+# Data and logs
+*.log
+data/
+logs/
+
+# Poetry lock file (not needed, requirements.txt is generated)
+poetry.lock
+
+# Application code (not needed in postgres container, only in MCP container)
+# EODHD_MCP_server/ is needed for MCP service
+# googleadkplayground/ is not needed in containers

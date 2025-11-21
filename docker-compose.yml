@@ -1,0 +1,58 @@
+version: '3.8'
+
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
+    container_name: adk_postgres
+    environment:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: agent_state
+      POSTGRES_USER: postgres
+    ports:
+      - "5432:5432"  # Exposed to host machine for agents running locally
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - adk_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.eodmcp
+    container_name: adk_mcp
+    environment:
+      EODHD_API_KEY: ${EODHD_API_KEY}
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: 8000
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"  # Exposed to host machine
+    networks:
+      - adk_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  adk_network:
+    driver: bridge
