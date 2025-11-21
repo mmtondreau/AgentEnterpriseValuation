@@ -1,0 +1,24 @@
+FROM python:3.11-slim
+
+# Create app directory
+WORKDIR /app
+
+# Copy the local EODHD_MCP_server directory
+COPY EODHD_MCP_server/ .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy our entrypoint script
+COPY eodmcp-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+# Default host/port for HTTP server
+ENV MCP_HOST=0.0.0.0
+ENV MCP_PORT=8000
+
+# Expose HTTP port
+EXPOSE 8000
+
+# Run the entrypoint (which writes .env and starts the server)
+CMD ["/docker-entrypoint.sh"]

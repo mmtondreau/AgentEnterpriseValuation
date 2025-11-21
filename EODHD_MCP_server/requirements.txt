@@ -1,0 +1,14 @@
+# EODHD MCP Server Dependencies
+# Python 3.10+ required
+
+# Core MCP framework
+fastmcp
+
+# HTTP client for API requests
+httpx
+
+# Environment variable management
+python-dotenv
+
+# WebSocket support for real-time data
+websockets
