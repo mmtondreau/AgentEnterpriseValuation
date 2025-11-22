@@ -2498,6 +2498,17 @@ opentelemetry-api = "1.37.0"
 typing-extensions = ">=4.5.0"
 
 [[package]]
+name = "overrides"
+version = "7.7.0"
+description = "A decorator to automatically detect mismatch when overriding a method."
+optional = false
+python-versions = ">=3.6"
+files = [
+    {file = "overrides-7.7.0-py3-none-any.whl", hash = "sha256:c7ed9d062f78b8e4c1a7b70bd8796b35ead4d9f510227ef9c5dc7626c60d7e49"},
+    {file = "overrides-7.7.0.tar.gz", hash = "sha256:55158fa3d93b98cc75299b1e67078ad9003ca27945c76162c1c0766d6f91820a"},
+]
+
+[[package]]
 name = "packaging"
 version = "25.0"
 description = "Core utilities for Python packages"
@@ -3990,4 +4001,4 @@ type = ["pytest-mypy"]
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.10"
-content-hash = "e94170cd408cfe0cde5466079c533198165fa6267b34622a95e494d0224cddea"
+content-hash = "a71824ecfdb3a55e934b9c74c249ae2ccb09d1257c5fc1bf1e77b6539ea88639"

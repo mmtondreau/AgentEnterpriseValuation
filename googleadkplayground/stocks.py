@@ -2,7 +2,7 @@ import os
 from google.adk.agents import Agent, ParallelAgent, LoopAgent, SequentialAgent
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner, InMemoryRunner
-from google.adk.tools import google_search, FunctionTool, AgentTool
+from google.adk.tools import google_search, FunctionTool, AgentTool, load_memory
 from google.genai import types
 from urllib.parse import urlencode
 
@@ -15,6 +15,8 @@ from google.adk.tools.mcp_tool.mcp_session_manager import (
 from google.adk.sessions import DatabaseSessionService
 from mcp import StdioServerParameters
 
+from googleadkplayground.postgres_memory_service import PostgresMemoryService
+
 retry_config = types.HttpRetryOptions(
     attempts=5,  # Maximum retry attempts
     exp_base=7,  # Delay multiplier
@@ -26,6 +28,13 @@ LITE_MODEL = "gemini-2.5-flash-lite"
 
 user_id = "debug_user"
 session_id = "debug_session"
+
+
+async def auto_save_to_memory(callback_context):
+    """Automatically save session to memory after each agent turn."""
+    await callback_context._invocation_context.memory_service.add_session_to_memory(
+        callback_context._invocation_context.session
+    )
 
 
 async def run():
@@ -51,19 +60,36 @@ async def run():
         root_agent = Agent(
             name="root_agent",
             model=Gemini(model=LITE_MODEL, retry_options=retry_config),
-            instruction="""You are a financial assistant. Based on the user prompt use the eodHistoricalData get_fundamentals_data tool to gather information about fundamentals. IMPORTANT: When calling get_fundamentals_data, you MUST use the from_date parameter to limit data to only the last 2 years to avoid exceeding token limits. For example, use from_date="2023-01-01". Also gather company news using get_company_news and current price data. Provide concise and accurate information to help users make informed financial decisions.""",
-            tools=[eodHistoricalData],
+            instruction="""
+            You are a financial assistant. Based on the user prompt use the eodHistoricalData get_fundamentals_data 
+            tool to gather information about fundamentals. IMPORTANT: When calling get_fundamentals_data, you MUST use the from_date 
+            parameter to limit data to only the last 2 years to avoid exceeding token limits. For example, use from_date="2023-01-01". 
+            Also gather company news using get_company_news and current price data. Provide concise and accurate information to help
+            users make informed financial decisions. Make sure to include the current timestamp in your analysis that this report was
+            generated if it was just generated (e.g. not from memory).
+            
+            You have access to load_memory tool to retrieve relevant past analysis from long-term memory. If you see the analysis is
+            recently done (within last 24 hours), you can reference it in your final response. Make sure to indicate the time of the
+            original analysis. We should be checking against the original analysis timestamp not the timestamp of the session in which it is
+            stored.
+            """,
+            tools=[eodHistoricalData, load_memory],
             output_key="final_response",
+            after_agent_callback=auto_save_to_memory,
         )
 
         db_url = "postgresql://postgres@localhost:5432/agent_state"  # Local PostgreSQL database
         session_service = DatabaseSessionService(db_url=db_url)
 
+        # Use async URL for memory service
+        async_db_url = "postgresql+asyncpg://postgres@localhost:5432/agent_state"
+        memory_service = PostgresMemoryService(db_url=async_db_url)
         # Initialize runner with the agent and database session service
         runner = Runner(
             agent=root_agent,
             app_name="financial_assistant",
-            session_service=session_service
+            session_service=session_service,
+            memory_service=memory_service,
         )
 
         # Delete existing session if it exists, then create fresh session
