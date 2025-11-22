@@ -64,9 +64,27 @@ This will start:
 - **PostgreSQL** on `localhost:5432` (database: `agent_state`, user: `postgres`, no password)
 - **EODHD MCP Server** on `localhost:8000`
 
-### 4. Run the Agent Service
+### 4. Run the Agents
 
-With the infrastructure running, start your agent:
+You have two options to run the agents:
+
+#### Option A: ADK Web UI (Recommended)
+
+Start the interactive web interface:
+
+```bash
+# Make the script executable (first time only)
+chmod +x run_web_ui.sh
+
+# Start the web UI
+./run_web_ui.sh
+```
+
+Then open your browser to `http://localhost:8080` to interact with the financial assistant agent.
+
+#### Option B: CLI Mode
+
+Run the legacy CLI version:
 
 ```bash
 # Run the main application (currently runs stocks.py)
@@ -82,9 +100,17 @@ The agent will:
 
 ```
 GoogleADKPlayground/
-├── googleadkplayground/          # Main application code
-│   ├── stocks.py                 # Financial analysis agent
-│   └── __main__.py              # Entry point
+├── agents/                       # ADK agents directory
+│   └── financial_assistant/      # Financial analysis agent
+│       ├── __init__.py           # Agent module initialization
+│       ├── agent.py              # Agent definition
+│       └── README.md             # Agent documentation
+├── services/                     # Shared services
+│   ├── __init__.py
+│   └── postgres_memory_service.py # PostgreSQL memory service
+├── googleadkplayground/          # Legacy CLI application code
+│   ├── stocks.py                 # Original agent implementation
+│   └── __main__.py              # Entry point for CLI mode
 ├── EODHD_MCP_server/            # EODHD MCP server (cloned submodule)
 ├── conf/                        # Hydra configuration files
 │   └── local.yml               # Local config (API keys)
@@ -92,6 +118,8 @@ GoogleADKPlayground/
 ├── Dockerfile.postgres          # PostgreSQL database image
 ├── Dockerfile.eodmcp           # EODHD MCP server image
 ├── init-db.sql                 # Database schema initialization
+├── agents_config.py             # Agent services configuration
+├── run_web_ui.sh               # Start ADK Web UI
 ├── .env.example                # Environment variable template
 ├── pyproject.toml              # Poetry dependencies
 └── README.md                   # This file
@@ -147,12 +175,55 @@ docker-compose down -v
 
 ## Development
 
+### ADK Web UI Features
+
+The ADK Web UI provides:
+- **Interactive Chat Interface**: Chat with agents in real-time through a web browser
+- **Session Management**: Persistent sessions stored in PostgreSQL
+- **Long-term Memory**: Agents remember past conversations via the PostgreSQL memory service
+- **Hot Reload**: Changes to agent code are automatically reloaded (when using `--reload_agents` flag)
+- **Multi-agent Support**: Run multiple agents simultaneously from the `agents/` directory
+
+### Creating New Agents
+
+To create a new agent:
+
+1. Create a new directory under `agents/`:
+   ```bash
+   mkdir -p agents/my_new_agent
+   ```
+
+2. Create `agents/my_new_agent/__init__.py`:
+   ```python
+   from .agent import root_agent, app_name
+   __all__ = ["root_agent", "app_name"]
+   ```
+
+3. Create `agents/my_new_agent/agent.py`:
+   ```python
+   from google.adk.agents import Agent
+   from google.adk.models.google_llm import Gemini
+
+   # Define the root agent for ADK Web UI
+   root_agent = Agent(
+       name="my_new_agent",
+       model=Gemini(model="gemini-2.5-flash-lite"),
+       instruction="Your agent instructions here...",
+       tools=[],  # Add tools here
+   )
+
+   # For ADK Web UI
+   app_name = "my_new_agent"
+   ```
+
+4. Restart the web UI to see your new agent
+
 ### Running Different Agents
 
 The main entry point is configured in `googleadkplayground/__main__.py`:
 
 ```bash
-# Currently runs stocks.py
+# Currently runs stocks.py (legacy CLI mode)
 python -m googleadkplayground
 ```
 
@@ -245,6 +316,9 @@ Make sure:
 
 ## Additional Documentation
 
+- **[WEB_UI_QUICKSTART.md](./WEB_UI_QUICKSTART.md)** - Quick start guide for the ADK Web UI (start here!)
+- **[MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md)** - Understanding the new ADK structure
+- [agents/financial_assistant/README.md](./agents/financial_assistant/README.md) - Financial assistant agent documentation
 - [CLAUDE.md](./CLAUDE.md) - Project guidance for Claude Code
 - [DOCKER_README.md](./DOCKER_README.md) - Detailed Docker setup documentation
 
