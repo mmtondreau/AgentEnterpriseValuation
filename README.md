@@ -317,6 +317,7 @@ Make sure:
 ## Additional Documentation
 
 - **[WEB_UI_QUICKSTART.md](./WEB_UI_QUICKSTART.md)** - Quick start guide for the ADK Web UI (start here!)
+- **[CODE_REUSE.md](./CODE_REUSE.md)** - How agent code is shared between Web UI and CLI
 - **[MIGRATION_GUIDE.md](./MIGRATION_GUIDE.md)** - Understanding the new ADK structure
 - [agents/financial_assistant/README.md](./agents/financial_assistant/README.md) - Financial assistant agent documentation
 - [CLAUDE.md](./CLAUDE.md) - Project guidance for Claude Code

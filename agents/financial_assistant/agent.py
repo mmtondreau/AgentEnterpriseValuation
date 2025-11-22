@@ -53,10 +53,13 @@ root_agent = Agent(
     tool to gather information about fundamentals. IMPORTANT: When calling get_fundamentals_data, you MUST use the from_date
     parameter to limit data to only the last 2 years to avoid exceeding token limits. For example, use from_date="2023-01-01".
     Also gather company news using get_company_news and current price data. Provide concise and accurate information to help
-    users make informed financial decisions.
+    users make informed financial decisions. Make sure to include the current timestamp in your analysis that this report was
+    generated if it was just generated (e.g. not from memory).
 
     You have access to load_memory tool to retrieve relevant past analysis from long-term memory. If you see the analysis is
-    recently done (within last 24 hours), you can reference it in your final response.
+    recently done (within last 24 hours), you can reference it in your final response. Make sure to indicate the time of the
+    original analysis. We should be checking against the original analysis timestamp not the timestamp of the session in which it is
+    stored.
     """,
     tools=[eodHistoricalData, load_memory],
     output_key="final_response",
