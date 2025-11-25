@@ -15,7 +15,10 @@ retry_config = types.HttpRetryOptions(
     http_status_codes=[429, 500, 503, 504],
 )
 
-LITE_MODEL = "gemini-2.5-flash-lite"
+# Model selection: Flash has 2M context window vs Flash Lite's 1M
+# Use Flash to handle the large context accumulation in SequentialAgent
+FLASH_MODEL = "gemini-2.5-flash"
+LITE_MODEL = "gemini-2.5-flash-lite"  # Kept for reference
 
 
 async def auto_save_to_memory(callback_context):
@@ -29,7 +32,7 @@ async def auto_save_to_memory(callback_context):
 # # Define the root agent for ADK Web UI
 # root_agent = Agent(
 #     name="financial_assistant",
-#     model=Gemini(model=LITE_MODEL, retry_options=retry_config),
+#     model=Gemini(model=FLASH_MODEL, retry_options=retry_config),
 #     instruction="""
 #     You are a financial assistant. Based on the user prompt use the eodHistoricalData get_fundamentals_data
 #     tool to gather information about fundamentals. IMPORTANT: When calling get_fundamentals_data, you MUST use the from_date
@@ -51,9 +54,9 @@ async def auto_save_to_memory(callback_context):
 
 from google.adk.models import Gemini
 
-# Use Gemini 2.5 Flash Lite with strict output compactness to avoid token limits
-# All agents are configured to output minimal, summarized data only
-model = Gemini(model=LITE_MODEL, retry_options=retry_config)
+# Use Gemini 2.5 Flash (2M context) instead of Flash Lite (1M context)
+# to handle large context accumulation in SequentialAgent with financial data
+model = Gemini(model=FLASH_MODEL, retry_options=retry_config)
 
 
 scoping_agent = LlmAgent(
@@ -142,18 +145,20 @@ STEPS:
 
 3. Fundamentals (last ~3 years)
    - Call get_fundamentals_data for resolved_symbol with 'from_date' = exactly 3 years before today.
-   - From the last 3 fiscal years extract:
-     - income statement: revenue, EBIT (operating income), net income.
-     - balance sheet: total_debt, cash_and_equivalents, working_capital, total assets/liabilities/equity if available.
-     - cash flow: CFO, capex, depreciation & amortization.
-   - Build a small normalized time series; no extra fields.
+   - From the last 3 fiscal years extract ONLY these specific fields:
+     - income statement: revenue, EBIT (operating income), net_income.
+     - balance sheet: total_debt, cash_and_equivalents, working_capital.
+     - cash flow: operatingCashFlow (CFO), capitalExpenditures (capex), depreciation.
+   - CRITICAL: Extract ONLY the minimal required fields. Do NOT include the full API response or extra fields.
+   - IMPORTANT: Store capex as a POSITIVE number (absolute value). If the API returns negative capex, negate it to make it positive.
+   - Build a small normalized time series with ONLY the fields listed in the output schema below.
 
 4. Earnings trends & sector
    - Optionally call get_earnings_trends and summarize only what is needed later (no raw payload).
    - From fundamentals, extract sector and industry strings.
 
-OUTPUT:
-Return ONLY JSON with top-level key "data_result":
+OUTPUT REQUIREMENTS:
+CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any natural language text, summaries, explanations, or commentary before or after the JSON. Do NOT say things like "The current price is..." or "Here is the data...". ONLY output the raw JSON structure.
 
 {
   "data_result": {
@@ -215,7 +220,8 @@ normalization_agent = LlmAgent(
         - ebit_margin = ebit / revenue,
         - net_margin = net_income / revenue,
         - cfo_margin = cfo / revenue,
-        - capex_to_revenue = capex / revenue.
+        - capex_to_revenue = abs(capex) / revenue (MUST be positive).
+    - IMPORTANT: Ensure capex and capex_to_revenue are POSITIVE numbers. If capex is negative, take its absolute value.
     - Do NOT invent missing numbers; leave null if unavailable.
 
     2. Business characterization
@@ -224,8 +230,8 @@ normalization_agent = LlmAgent(
 
     3. Steady-state assumptions
     - Propose approximate ranges (low, high) for:
-        - ebit_margin_range
-        - capex_to_revenue_range
+        - ebit_margin_range: where high > low (e.g. [0.28, 0.32])
+        - capex_to_revenue_range: POSITIVE ratios where high > low (e.g. [0.02, 0.03])
     - Use history as anchor; if unclear, use null and explain briefly.
     - Add a short note on working_capital_intensity based on working_capital and revenue, or state that it is unclear.
 
@@ -301,8 +307,10 @@ STEPS:
 
 3. Reinvestment
    - Capex: start from historical capex_to_revenue and move toward steady_state_assumptions.capex_to_revenue_range.
-   - Depreciation: keep roughly proportional to capex or revenue.
+   - IMPORTANT: Forecast capex as a POSITIVE number (absolute value). It represents cash outflow.
+   - Depreciation: keep roughly proportional to capex or revenue (positive number).
    - change_in_working_capital: approximate as a simple % of revenue change based on normalization; if unclear, assume modest requirement and mention in notes.
+     - Use positive for cash outflow (increase in working capital), negative for cash inflow (decrease).
 
 OUTPUT:
 Return ONLY JSON with key "forecast":
@@ -369,8 +377,8 @@ STEPS:
    - WACC = E/(D+E) * r_e + D/(D+E) * r_d * (1 – tax_rate); if D very small, WACC ≈ r_e.
    - Choose a long-term terminal_growth_rate below long-run nominal GDP/inflation (typically 1–3% in real terms plus inflation) and justify in 1–2 sentences.
 
-OUTPUT:
-Return ONLY JSON with key "capital_assumptions":
+OUTPUT REQUIREMENTS:
+CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any markdown formatting, explanations, or text before or after the JSON. Do NOT write things like "Here are the capital assumptions..." or "Based on the analysis...". ONLY output the raw JSON structure.
 
 {
   "capital_assumptions": {
@@ -407,13 +415,22 @@ Compute unlevered FCFs, discount them, and derive enterprise value, equity value
 STEPS:
 1. FCF series
    - For each forecast year t:
-     - Use nopat, depreciation, capex, change_in_working_capital from forecast.years[t].
-     - FCF_t = nopat + depreciation – capex – change_in_working_capital.
+     - Extract: nopat, depreciation, capex, change_in_working_capital from forecast.years[t].
+     - IMPORTANT: Capex and depreciation should be POSITIVE numbers in the forecast.
+     - CRITICAL: Compute FCF for EACH year using this exact formula:
+       FCF_t = nopat + depreciation – capex – change_in_working_capital
+     - Example: If nopat=32.175B, dep=2.8B, capex=2.5B, ΔWC=-1.0B, then:
+       FCF = 32.175 + 2.8 - 2.5 - (-1.0) = 33.475B
+     - Do NOT return FCF = NOPAT. You MUST include all four components.
 
-2. Terminal value
+2. Terminal value (Gordon Growth formula)
    - Let n = last forecast year index.
    - FCF_(n+1) = FCF_n × (1 + terminal_growth_rate).
-   - TerminalValue = FCF_(n+1) / (wacc – terminal_growth_rate).
+   - CRITICAL: Apply the perpetuity formula with the divisor:
+     TerminalValue = FCF_(n+1) / (wacc – terminal_growth_rate)
+   - Example: If FCF_(n+1)=37.4B, wacc=0.0889, g=0.025, then:
+     TV = 37.4B / (0.0889 - 0.025) = 37.4B / 0.0639 ≈ 585B
+   - Do NOT set TV = FCF_(n+1). You MUST divide by (wacc - g).
 
 3. Discounting
    - For each t in 1..n:
@@ -422,8 +439,12 @@ STEPS:
    - EnterpriseValue = sum(PV_FCF_t) + PV_TerminalValue
 
 4. Equity value and per-share
-   - Use latest total_debt and cash_and_equivalents from available data.
-   - EquityValue = EnterpriseValue – total_debt + cash_and_equivalents.
+   - Use latest total_debt and cash_and_equivalents from normalization_result or data_result.
+   - CRITICAL: Compute net debt adjustment:
+     EquityValue = EnterpriseValue – total_debt + cash_and_equivalents
+   - Example: If EV=585B, debt=95B, cash=41B, then:
+     Equity = 585 - 95 + 41 = 531B
+   - Do NOT set EquityValue = EnterpriseValue. You MUST subtract debt and add cash.
    - If shares_outstanding present, ValuePerShare = EquityValue / shares_outstanding; else null.
    - Always compute all three: EnterpriseValue, EquityValue, ValuePerShare (if possible).
    - Align later with scoping_result.valuation_target (but still return all values).
@@ -470,25 +491,37 @@ INPUTS (from valuation_state):
 - dcf_result
 
 STEPS:
-1. Subject company multiples
-   - Using latest available data, compute where possible:
-     - P/E = market_cap / net_income
-     - EV/Revenue
-     - EV/EBITDA (or EV/EBIT if EBITDA not available).
-   - Also compute DCF-implied multiples from dcf_result enterprise/equity values and the same financial metrics.
+1. DCF sanity checks (CRITICAL - check these first)
+   - Verify dcf_result.equity_value ≠ dcf_result.enterprise_value (they should differ by net debt)
+   - Verify dcf_result.terminal_value is NOT approximately equal to a single year's FCF (it should be much larger due to perpetuity formula)
+   - Verify dcf_result.fcf_series values are NOT just equal to NOPAT (they should include depreciation, capex, working capital)
+   - If any of these checks fail, note "DCF calculation appears to have errors" in reasonability_assessment
 
-2. News check
+2. Subject company multiples
+   - Using latest available data, compute where possible:
+     - P/E = market_cap / net_income (typical range for mature companies: 15-30x; high growth: 30-60x; >100x is extremely high)
+     - EV/Revenue = enterprise_value / latest_revenue
+     - EV/EBITDA = enterprise_value / latest_ebitda (or EV/EBIT if EBITDA not available).
+   - Also compute DCF-implied multiples from dcf_result enterprise/equity values and the same financial metrics.
+   - CRITICAL: "Value per share" and "Earnings per share" are DIFFERENT:
+     - Value per share = equity value / shares outstanding (what the company is worth per share)
+     - Earnings per share (EPS) = net income / shares outstanding (what the company earns per share)
+     - P/E ratio = (value per share) / EPS = market price / EPS
+
+3. News check
    - Use get_company_news to see if there is any very recent major positive/negative catalyst; summarize in ≤ 2 sentences or set null if nothing material.
 
-3. Optional peers
+4. Optional peers
    - If 1–3 obvious peers are clear from company name and industry, you may fetch their key metrics and basic multiples with get_fundamentals_data.
    - If not obvious, skip and note that peer data is limited.
 
-4. Reasonability
+5. Reasonability
+   - Check if DCF value per share is drastically different (>10x difference) from current market price
+   - If so, before attributing this to "market pricing in growth", check if DCF calculations appear broken (from step 1)
    - Briefly state whether the DCF valuation looks conservative, aggressive, or broadly in line with trading and peer multiples, and why.
 
-OUTPUT:
-Return ONLY JSON with key "multiples_result":
+OUTPUT REQUIREMENTS:
+CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any markdown formatting, explanations, or text before or after the JSON. Do NOT write things like "Based on the analysis..." or "Here are the multiples...". ONLY output the raw JSON structure.
 
 {
   "multiples_result": {
