@@ -54,7 +54,7 @@ async def run():
             session_id=session_id,
         )
 
-y        await runner.run_debug(
+        await runner.run_debug(
             "Provide a valuation for AAPL.",
             user_id=user_id,
             session_id=session_id,
