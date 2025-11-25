@@ -58,10 +58,20 @@ from google.adk.models import Gemini
 # to handle large context accumulation in SequentialAgent with financial data
 model = Gemini(model=FLASH_MODEL, retry_options=retry_config)
 
+# For agents that need strict JSON output, create a separate model instance
+# with JSON mode enabled (agents with tools cannot use JSON mode)
+json_model = Gemini(
+    model=FLASH_MODEL,
+    retry_options=retry_config,
+    generation_config=types.GenerateContentConfig(
+        response_mime_type="application/json"
+    )
+)
+
 
 scoping_agent = LlmAgent(
     name="scoping_agent",
-    model=model,
+    model=json_model,
     instruction="""
 You are the Scoping & Clarification Agent in a valuation workflow.
 
@@ -197,7 +207,7 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any n
 
 normalization_agent = LlmAgent(
     name="normalization_agent",
-    model=model,
+    model=json_model,
     instruction="""
     You are the Normalization & Business Understanding Agent. Do not call tools.
 
@@ -226,6 +236,7 @@ normalization_agent = LlmAgent(
 
     2. Business characterization
     - From the time series infer if revenue is growing/stable/shrinking, margins expanding/stable/compressing, capex high/medium/low vs revenue, and whether volatility is high.
+    - Be precise about trends: if a metric changes direction (e.g., working capital becomes less negative in the last year), note that explicitly.
     - Summarize in ≤ 2 sentences.
 
     3. Steady-state assumptions
@@ -275,7 +286,7 @@ normalization_agent = LlmAgent(
 
 forecast_agent = LlmAgent(
     name="forecast_agent",
-    model=model,
+    model=json_model,
     instruction="""
 You are the Forecasting Agent. Build an unlevered operating forecast. Do not call tools and do not do DCF math.
 
@@ -311,6 +322,7 @@ STEPS:
    - Depreciation: keep roughly proportional to capex or revenue (positive number).
    - change_in_working_capital: approximate as a simple % of revenue change based on normalization; if unclear, assume modest requirement and mention in notes.
      - Use positive for cash outflow (increase in working capital), negative for cash inflow (decrease).
+     - IMPORTANT: Do NOT assume perpetual negative working capital changes (perpetual cash inflows). If historical WC is negative and stable, assume it stabilizes or trends toward zero in later forecast years to avoid unrealistic perpetual cash generation.
 
 OUTPUT:
 Return ONLY JSON with key "forecast":
@@ -366,7 +378,12 @@ STEPS:
 2. Cost of equity (r_e)
    - Use a CAPM-like approach conceptually: risk_free_rate + equity_risk_premium × typical beta.
    - Use get_macro_indicator for risk-free or inflation if needed.
-   - If concrete inputs missing, choose a reasonable point in a 7–12% range based on size, industry, and risk, and explain briefly.
+   - If concrete inputs missing, choose a reasonable estimate based on company profile:
+     - Mega-cap, stable, low-leverage (e.g., Apple, Microsoft): 7-9%
+     - Large-cap, moderate risk: 9-11%
+     - High-growth or higher risk: 11-14%
+   - Be mindful that cost of equity directly impacts valuation: higher r_e → lower value.
+   - Explain your choice briefly.
 
 3. Cost of debt (r_d)
    - Infer from history (interest expense vs debt) if visible; else from company risk and macro rates.
@@ -375,7 +392,11 @@ STEPS:
 4. WACC and terminal growth
    - Use a tax_rate consistent with forecast (e.g. its average).
    - WACC = E/(D+E) * r_e + D/(D+E) * r_d * (1 – tax_rate); if D very small, WACC ≈ r_e.
-   - Choose a long-term terminal_growth_rate below long-run nominal GDP/inflation (typically 1–3% in real terms plus inflation) and justify in 1–2 sentences.
+   - Choose a long-term terminal_growth_rate below long-run nominal GDP growth:
+     - Typical range: 2-3% nominal (reflects inflation ~2% plus modest real growth ~0-1%)
+     - For mature mega-caps, often 2.0-2.5%; for slower-growth, may be lower
+     - IMPORTANT: State whether this is in nominal or real terms, and be consistent with WACC (which should be nominal)
+     - Justify in 1–2 sentences.
 
 OUTPUT REQUIREMENTS:
 CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any markdown formatting, explanations, or text before or after the JSON. Do NOT write things like "Here are the capital assumptions..." or "Based on the analysis...". ONLY output the raw JSON structure.
@@ -397,7 +418,7 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any m
 
 dcf_agent = LlmAgent(
     name="dcf_agent",
-    model=model,
+    model=json_model,
     tools=[],
     instruction="""
 You are the DCF Valuation Agent. Do not call tools.
@@ -562,7 +583,7 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any m
 
 report_agent = LlmAgent(
     name="report_agent",
-    model=model,
+    model=json_model,
     instruction="""
 You are the Report & Explanation Agent. Synthesize all prior outputs into a final valuation and a short explanation. Do not call tools.
 
