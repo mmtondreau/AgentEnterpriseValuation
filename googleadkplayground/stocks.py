@@ -13,7 +13,8 @@ from google.adk.sessions import DatabaseSessionService
 from services.postgres_memory_service import PostgresMemoryService
 
 # Import the shared agent from agents directory
-from agents.financial_assistant import root_agent, eodHistoricalData
+from agents.financial_assistant import root_agent
+from agents.financial_assistant.eodhd_mcp import eodHistoricalData
 
 user_id = "debug_user"
 session_id = "debug_session"
@@ -53,8 +54,8 @@ async def run():
             session_id=session_id,
         )
 
-        await runner.run_debug(
-            "Get the latest fundamental data on AAPL and provide a summary of its recent performance.",
+y        await runner.run_debug(
+            "Provide a valuation for AAPL.",
             user_id=user_id,
             session_id=session_id,
         )

@@ -18,3 +18,10 @@ CREATE TABLE memory_entries (
 
 CREATE INDEX idx_memory_app_user
   ON memory_entries(app_name, user_id);
+
+  CREATE TABLE api_cache (
+  cache_key   text PRIMARY KEY,
+  payload     jsonb NOT NULL,
+  fetched_at  timestamptz NOT NULL,
+  expires_at  timestamptz
+);
