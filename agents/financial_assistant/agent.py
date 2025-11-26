@@ -1,10 +1,9 @@
 """Financial Assistant Agent using EODHD MCP Server for market data."""
 
-import os
-from google.adk.agents import Agent, SequentialAgent, LlmAgent
+from google.adk.agents import SequentialAgent
 from google.adk.models.google_llm import Gemini
-from google.adk.tools import load_memory
 from .eodhd_mcp import eodHistoricalData
+from .agent_validator import AgentValidator
 from google.genai import types
 
 # Retry configuration for Gemini API
@@ -69,9 +68,10 @@ json_model = Gemini(
 )
 
 
-scoping_agent = LlmAgent(
-    name="scoping_agent",
+scoping_agent = AgentValidator(
+    name="scoping",
     model=json_model,
+    tools=[],
     instruction="""
 You are the Scoping & Clarification Agent in a valuation workflow.
 
@@ -119,8 +119,8 @@ Return ONLY a JSON object with top-level key "scoping_result" and fields:
     output_key="scoping_result",
 )
 
-data_agent = LlmAgent(
-    name="data_agent",
+data_agent = AgentValidator(
+    name="data",
     model=model,
     tools=[eodHistoricalData],
     instruction="""
@@ -154,11 +154,13 @@ STEPS:
    - If market cap missing but shares_outstanding available from fundamentals, approximate market_cap = price × shares_outstanding; else null.
 
 3. Fundamentals (last ~3 years)
-   - Call get_fundamentals_data for resolved_symbol with 'from_date' = exactly 3 years before today.
-   - From the last 3 fiscal years extract ONLY these specific fields:
+   - CRITICAL: Call get_fundamentals_data with period=Annual (or equivalent parameter to ensure ANNUAL data, not quarterly).
+   - Use 'from_date' = exactly 3 years before today.
+   - From the last 3 ANNUAL fiscal years extract ONLY these specific fields:
      - income statement: revenue, EBIT (operating income), net_income.
      - balance sheet: total_debt, cash_and_equivalents, working_capital.
      - cash flow: operatingCashFlow (CFO), capitalExpenditures (capex), depreciation.
+   - SANITY CHECK: For well-known mega-cap companies (e.g., AAPL, MSFT, GOOGL), annual revenue should be >$100B. If you get values like $80-90B for Apple, you likely pulled quarterly data by mistake - retry with explicit annual period.
    - CRITICAL: Extract ONLY the minimal required fields. Do NOT include the full API response or extra fields.
    - IMPORTANT: Store capex as a POSITIVE number (absolute value). If the API returns negative capex, negate it to make it positive.
    - Build a small normalized time series with ONLY the fields listed in the output schema below.
@@ -170,10 +172,17 @@ STEPS:
 OUTPUT REQUIREMENTS:
 CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any natural language text, summaries, explanations, or commentary before or after the JSON. Do NOT say things like "The current price is..." or "Here is the data...". ONLY output the raw JSON structure.
 
+ALL FINANCIAL AMOUNTS:
+- MUST be expressed in MILLIONS (e.g., Apple revenue of $383B = 383000 in millions)
+- MUST include "unit_scale": "millions" and "currency": "USD" (or appropriate currency) at top level
+- Capex MUST be stored as POSITIVE number representing cash outflow
+
 {
   "data_result": {
     "resolved_symbol": "<string>",
     "resolved_name": "<string>",
+    "unit_scale": "millions",
+    "currency": "USD",
     "market_data": {
       "price": <number or null>,
       "currency": "<string or null>",
@@ -205,9 +214,10 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any n
     output_key="data_result",
 )
 
-normalization_agent = LlmAgent(
-    name="normalization_agent",
+normalization_agent = AgentValidator(
+    name="normalization",
     model=json_model,
+    tools=[],
     instruction="""
     You are the Normalization & Business Understanding Agent. Do not call tools.
 
@@ -249,8 +259,12 @@ normalization_agent = LlmAgent(
     OUTPUT:
     Return ONLY JSON with key "normalization_result":
 
+    ALL AMOUNTS in MILLIONS, Capex POSITIVE.
+
     {
     "normalization_result": {
+        "unit_scale": "millions",
+        "currency": "USD",
         "normalized_historical_financials": {
         "years": [
             {
@@ -284,9 +298,10 @@ normalization_agent = LlmAgent(
     output_key="normalized_result",
 )
 
-forecast_agent = LlmAgent(
-    name="forecast_agent",
+forecast_agent = AgentValidator(
+    name="forecast",
     model=json_model,
+    tools=[],
     instruction="""
 You are the Forecasting Agent. Build an unlevered operating forecast. Do not call tools and do not do DCF math.
 
@@ -327,8 +342,12 @@ STEPS:
 OUTPUT:
 Return ONLY JSON with key "forecast":
 
+ALL AMOUNTS in MILLIONS, Capex POSITIVE (cash outflow).
+
 {
   "forecast": {
+    "unit_scale": "millions",
+    "currency": "USD",
     "horizon_years": <int 5–7>,
     "years": [
       {
@@ -350,8 +369,8 @@ Return ONLY JSON with key "forecast":
     output_key="forecast",
 )
 
-wacc_agent = LlmAgent(
-    name="wacc_agent",
+wacc_agent = AgentValidator(
+    name="wacc",
     model=model,
     tools=[eodHistoricalData],
     instruction="""
@@ -416,8 +435,8 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any m
     output_key="capital_assumptions",
 )
 
-dcf_agent = LlmAgent(
-    name="dcf_agent",
+dcf_agent = AgentValidator(
+    name="dcf",
     model=json_model,
     tools=[],
     instruction="""
@@ -473,8 +492,12 @@ STEPS:
 OUTPUT:
 Return ONLY JSON with key "dcf_result":
 
+ALL AMOUNTS in MILLIONS.
+
 {
   "dcf_result": {
+    "unit_scale": "millions",
+    "currency": "USD",
     "discount_rate_wacc": <number>,
     "terminal_growth_rate": <number>,
     "fcf_series": [
@@ -492,8 +515,8 @@ Return ONLY JSON with key "dcf_result":
     output_key="dcf_result",
 )
 
-multiples_agent = LlmAgent(
-    name="multiples_agent",
+multiples_agent = AgentValidator(
+    name="multiples",
     model=model,
     tools=[eodHistoricalData],
     instruction="""
@@ -581,9 +604,10 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any m
     output_key="multiples_result",
 )
 
-report_agent = LlmAgent(
-    name="report_agent",
+report_agent = AgentValidator(
+    name="report",
     model=json_model,
+    tools=[],
     instruction="""
 You are the Report & Explanation Agent. Synthesize all prior outputs into a final valuation and a short explanation. Do not call tools.
 
@@ -662,6 +686,7 @@ Return ONLY JSON with key "final_valuation":
     output_key="final_valuation",
 )
 
+# Create the valuation workflow with validated agents
 valuation_workflow = SequentialAgent(
     name="valuation_workflow",
     sub_agents=[
