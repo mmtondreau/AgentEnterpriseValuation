@@ -155,7 +155,7 @@ multiples_semantic = ExtraValidatorSpec(
 2. DIVISION VALIDITY: If earnings or ebitda near zero, the multiple should be null, not huge (reject if >1000).
 3. CONSISTENCY WITH INPUTS: subject_current_multiples should align with market_cap and latest net_income within ±10% when both available.
 4. PEER LIST SIZE: peers_analyzed array length must be 0-3.
-5. PEER MEDIAN: If peers_analyzed non-empty, peer_median_multiples should be present and consistent with peer values.
+5. PEER MEDIAN: If peers_analyzed has 1+ entries, peer_median_multiples should have at least one non-null value; if peers_analyzed is empty, peer_median can have all null.
 6. UNITS: Must include unit_scale and currency fields.
 """,
 )
@@ -452,7 +452,8 @@ STEPS:
 2. EBIT and taxes
    - Start ebit_margin near recent normalized levels and move smoothly toward the midpoint (or a sensible value) of steady_state_assumptions.ebit_margin_range.
    - For each year compute:
-     - ebit = revenue × ebit_margin.
+     - CRITICAL: First choose target ebit_margin, then compute ebit = revenue × ebit_margin exactly
+     - CRITICAL: After computing ebit, recalculate ebit_margin = ebit / revenue to ensure exact consistency (output this recalculated value)
      - tax_rate: choose a reasonable effective rate (e.g. 20–30%) consistent across years unless history suggests otherwise.
      - nopat = ebit × (1 – tax_rate).
 
@@ -548,6 +549,8 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any m
 
 {
   "capital_assumptions": {
+    "unit_scale": "millions",
+    "currency": "USD",
     "cost_of_equity": <number>,        # e.g. 0.09
     "cost_of_debt": <number>,          # e.g. 0.04
     "equity_weight": <number or null>,
@@ -600,10 +603,16 @@ STEPS:
    - Do NOT set TV = FCF_(n+1). You MUST divide by (wacc - g).
 
 3. Discounting
+   - CRITICAL: Use the exact wacc value from capital_assumptions (do not round prematurely)
    - For each t in 1..n:
-     - PV_FCF_t = FCF_t / (1 + wacc)^t
+     - Discount factor = (1 + wacc)^t
+     - PV_FCF_t = FCF_t / discount_factor
+     - Example: If FCF_1 = 89,429 million, wacc = 0.0831, then:
+       discount_factor = (1.0831)^1 = 1.0831
+       PV_FCF_1 = 89,429 / 1.0831 = 82,548.81 million
    - PV_TerminalValue = TerminalValue / (1 + wacc)^n
-   - EnterpriseValue = sum(PV_FCF_t) + PV_TerminalValue
+   - EnterpriseValue = sum(all PV_FCF_t) + PV_TerminalValue
+   - IMPORTANT: Use sufficient precision (at least 2 decimal places for all intermediate calculations)
 
 4. Equity value and per-share
    - Use latest total_debt and cash_and_equivalents from normalization_result or data_result.
@@ -683,9 +692,13 @@ STEPS:
 3. News check
    - Use get_company_news to see if there is any very recent major positive/negative catalyst; summarize in ≤ 2 sentences or set null if nothing material.
 
-4. Optional peers
-   - If 1–3 obvious peers are clear from company name and industry, you may fetch their key metrics and basic multiples with get_fundamentals_data.
-   - If not obvious, skip and note that peer data is limited.
+4. Peers (REQUIRED - not optional)
+   - CRITICAL: You MUST attempt to identify and analyze 1-3 peers
+   - If company is well-known (e.g., AAPL, MSFT, GOOGL), use your knowledge of obvious peers in the same sector
+   - If less well-known, use sector/industry from data_result to identify comparable companies
+   - Fetch their key metrics using get_fundamentals_data: market_cap, revenue, EBITDA/EBIT, net_income
+   - Compute their multiples (P/E, EV/Revenue, EV/EBITDA) where data allows
+   - If you cannot identify ANY peers at all, set peers_analyzed to empty array and explain why in multiples_vs_dcf_notes
 
 5. Reasonability
    - Check if DCF value per share is drastically different (>10x difference) from current market price
@@ -697,6 +710,8 @@ CRITICAL: Your response MUST be ONLY the JSON object below. Do NOT include any m
 
 {
   "multiples_result": {
+    "unit_scale": "millions",
+    "currency": "USD",
     "subject_current_multiples": {
       "pe": <number or null>,
       "ev_to_revenue": <number or null>,
