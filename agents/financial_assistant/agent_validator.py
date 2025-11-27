@@ -19,6 +19,7 @@ retry_config = types.HttpRetryOptions(
 
 LITE_MODEL = "gemini-2.5-flash-lite"
 
+from google.adk.tools import FunctionTool, ToolContext
 import json
 
 
@@ -57,8 +58,13 @@ def validate_json(json_string: str) -> dict:
         }
 
 
-# Note: exit_loop function removed - LoopAgent cannot be exited early via tools.
-# Instead, refiner outputs the original unchanged content when all approve.
+def exit_loop(tool_context: ToolContext):
+    """Call this function ONLY when the response is 'APPROVED', indicating the response is correct, valid, complete and no more changes are needed.
+
+    This will set the escalate flag to exit the validation loop early.
+    """
+    tool_context.actions.escalate = True
+    return "Validation approved. Exiting refinement loop."
 
 
 class AgentValidator(SequentialAgent):
@@ -72,13 +78,23 @@ class AgentValidator(SequentialAgent):
     ) -> str:
         """Generate prompt for an extra validator."""
         return f"""
-CRITICAL: You are a {scope_label.upper()} VALIDATOR, NOT a content generator. Your ONLY job is to output a single word or a short rejection line.
+═══════════════════════════════════════════════════════════
+CRITICAL: YOU ARE A {scope_label.upper()} VALIDATOR - NOT A CONTENT GENERATOR
+═══════════════════════════════════════════════════════════
 
 YOUR ONLY TWO ALLOWED OUTPUTS:
-1. The word "APPROVED" (if {scope_label} is valid)
-2. "REJECTED: <one-line issue>" (if {scope_label} has problems)
+1. The single word: APPROVED
+2. The text: REJECTED: <one-line issue>
 
-DO NOT EVER output JSON, code, explanations, or anything else. ONLY "APPROVED" or "REJECTED: <issue>".
+═══════════════════════════════════════════════════════════
+ABSOLUTELY FORBIDDEN - NEVER EVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ Do NOT output JSON (```json{{...}}```)
+❌ Do NOT output code blocks
+❌ Do NOT output explanations or sentences
+❌ Do NOT output anything longer than one line
+❌ Do NOT generate corrected versions
+❌ Do NOT use tools (unless explicitly provided and absolutely necessary)
 
 WHAT TO VALIDATE:
 Review the immediately previous agent's output from conversation history.
@@ -89,25 +105,22 @@ EXPECTED TASK (from agent instructions):
 VALIDATION CHECKS:
 {extra_checks}
 
-ABSOLUTELY FORBIDDEN:
-- Do NOT generate corrected JSON
-- Do NOT generate alternative outputs
-- Do NOT write code blocks
-- Do NOT ask questions
-- Do NOT explain anything
-- Do NOT use tools (unless explicitly provided and absolutely necessary)
+═══════════════════════════════════════════════════════════
+CORRECT VALIDATOR OUTPUTS:
+═══════════════════════════════════════════════════════════
+✅ "APPROVED"
+✅ "REJECTED: capex is negative instead of positive"
+✅ "REJECTED: wacc <= terminal_growth_rate"
 
-EXAMPLES OF CORRECT VALIDATOR OUTPUT:
-- "APPROVED"
-- "REJECTED: capex is negative instead of positive"
-- "REJECTED: wacc <= terminal_growth_rate"
+═══════════════════════════════════════════════════════════
+WRONG VALIDATOR OUTPUTS - NEVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ ```json{{"corrected": "output"}}``` ← Generating content!
+❌ "The values should be..." ← Explaining!
+❌ Any multi-line output ← Too long!
+❌ {{"fixed": "data"}} ← Generating JSON!
 
-EXAMPLES OF INCORRECT VALIDATOR OUTPUT (NEVER DO THIS):
-- ```json{{"corrected": "output"}}``` ← WRONG! This is generating content!
-- "The values should be..." ← WRONG! This is explaining!
-- Any output longer than one line ← WRONG!
-
-YOUR OUTPUT RIGHT NOW:
+YOUR OUTPUT RIGHT NOW (must be ONLY "APPROVED" or "REJECTED: ..."):
         """
 
     @staticmethod
@@ -117,73 +130,87 @@ YOUR OUTPUT RIGHT NOW:
     ) -> str:
         """Generate prompt for the refiner with dynamic validator count."""
         return f"""
-CRITICAL: You are a REFINER. You fix JSON/content based on validator rejections.
+===========================================
+CRITICAL INSTRUCTION - READ THIS FIRST
+===========================================
+You are a REFINER agent. Your ONLY job is:
+1. Call exit_loop() if all {validator_count} validators said "APPROVED"
+2. Output corrected JSON/content if any validator rejected
 
-YOUR ONLY ALLOWED OUTPUT:
-- [Corrected JSON/content] - Output the corrected content, or the ORIGINAL UNCHANGED content if all validators approved
-
-DO NOT EVER OUTPUT:
-- ❌ "REJECTED: ..." - This is a validator output, NOT a refiner output
-- ❌ "The issue is..." - This is an explanation, NOT a refiner output
-- ❌ "APPROVED" - This is a validator output, NOT a refiner output
-- ❌ Any text explanation - This is NOT a refiner output
+NEVER EVER OUTPUT TEXT EXPLANATIONS OR "REJECTED: ..." MESSAGES!
+===========================================
 
 STEP 1: COUNT APPROVALS
-Look at the {validator_count} most recent validator outputs.
-Count how many say EXACTLY "APPROVED".
+Look at the {validator_count} most recent validator outputs ONLY.
+Count how many say the EXACT word "APPROVED" (nothing else).
 
 STEP 2: DECISION
-IF approval_count == {validator_count}:
-  → Output the ORIGINAL content EXACTLY as it was (no changes)
-  → This signals validation passed
 
-ELSE (some validators rejected):
-  → Find the ORIGINAL output (from before validation)
-  → Read validator rejection reasons
-  → Fix the original output to address ALL rejections
-  → Output ONLY the corrected JSON/content (pure JSON, no markdown code blocks)
-  → Use the SAME format as original (if JSON, output JSON; if markdown, output markdown)
-  → NO "REJECTED: ..." messages
-  → NO explanations or text before or after the JSON
-  → NO markdown formatting like ```json...```
+IF you counted {validator_count} validators that said "APPROVED":
+  ╔══════════════════════════════════════════════════════╗
+  ║  ACTION: Call the exit_loop() function tool         ║
+  ║  OUTPUT: Nothing else - do NOT add any text         ║
+  ╚══════════════════════════════════════════════════════╝
 
-ORIGINAL TASK (for fixing):
+ELSE (at least one validator said "REJECTED: ..."):
+  ╔══════════════════════════════════════════════════════╗
+  ║  1. Find the ORIGINAL output (before validators)     ║
+  ║  2. Read each "REJECTED: ..." reason                 ║
+  ║  3. Fix the original to address ALL rejections       ║
+  ║  4. Output ONLY pure JSON (no markdown, no text)     ║
+  ║  5. If data missing, call tools to fetch it          ║
+  ╚══════════════════════════════════════════════════════╝
+
+ORIGINAL TASK (for reference when fixing):
 {base_instruction}
 
-CORRECT REFINER OUTPUTS:
+═══════════════════════════════════════════════════════════
+EXAMPLES OF CORRECT REFINER BEHAVIOR
+═══════════════════════════════════════════════════════════
 
-✅ Example 1 - All approved:
-Input: Validators say "APPROVED", "APPROVED", "APPROVED", "APPROVED"
-Original: {{"a": 1, "b": 2}}
-Output: {{"a": 1, "b": 2}}
-(Exact copy of original - no changes)
+✅ CORRECT Example 1 - All approved:
+  Validators: "APPROVED", "APPROVED", "APPROVED"
+  Refiner action: Call exit_loop() tool
+  Refiner output: [function call only, no text]
 
-✅ Example 2 - Missing field:
-Input: Validators say "APPROVED", "REJECTED: Missing field X", "APPROVED", "APPROVED"
-Original: {{"a": 1, "b": 2}}
-Output: {{"a": 1, "b": 2, "X": null}}
-(Just the corrected JSON, NO other text)
+✅ CORRECT Example 2 - Missing field:
+  Validators: "APPROVED", "REJECTED: Missing field X", "APPROVED"
+  Original: {{"a": 1, "b": 2}}
+  Refiner output: {{"a": 1, "b": 2, "X": null}}
 
-✅ Example 3 - Invalid value:
-Input: Validators say "REJECTED: capex must be positive", "APPROVED"
-Original: {{"forecast": {{"capex": -100}}}}
-Output: {{"forecast": {{"capex": 100}}}}
-(Just the corrected JSON, NO other text)
+✅ CORRECT Example 3 - Invalid value:
+  Validators: "REJECTED: capex must be positive"
+  Original: {{"forecast": {{"capex": -100}}}}
+  Refiner output: {{"forecast": {{"capex": 100}}}}
 
-✅ Example 4 - Missing data, call tools:
-Input: Validators say "REJECTED: Missing historical financial data"
-Original: {{"data_result": {{"years": []}}}}
-Output: [Calls get_fundamentals_data tool, then outputs corrected JSON with populated data]
+═══════════════════════════════════════════════════════════
+EXAMPLES OF WRONG REFINER BEHAVIOR - NEVER DO THIS!
+═══════════════════════════════════════════════════════════
 
-WRONG REFINER OUTPUTS:
+❌ WRONG: "REJECTED: Historical data missing"
+   → This is pretending to be a validator! You must FIX, not reject!
 
-❌ "REJECTED: Historical data missing" - This is pretending to be a validator!
-❌ "The original output is missing X" - This is explaining, not fixing!
-❌ "I cannot fix this because..." - This is refusing to work!
-❌ ```json{{"fixed": "data"}}``` - This has markdown code blocks!
-❌ "Here is the corrected output: {{"data": ...}}" - This has explanatory text!
+❌ WRONG: "The original output is missing X field"
+   → This is explaining! You must output CORRECTED JSON, not text!
 
-REMEMBER: You are a FIXER, not a validator. Output corrected content (or original unchanged if all approved). NEVER output "REJECTED: ..."
+❌ WRONG: "I cannot fix this because..."
+   → You must always try to fix! Call tools if needed!
+
+❌ WRONG: ```json{{"fixed": "data"}}```
+   → NO markdown blocks! Output pure JSON only!
+
+❌ WRONG: "Here is the corrected output: {{"data": 123}}"
+   → NO explanatory text! Output pure JSON only!
+
+❌ WRONG: Outputting JSON when all validators approved
+   → Call exit_loop() instead! Don't waste iterations!
+
+═══════════════════════════════════════════════════════════
+FINAL REMINDER
+═══════════════════════════════════════════════════════════
+- If {validator_count}/{validator_count} said "APPROVED" → Call exit_loop()
+- If any validator rejected → Output corrected JSON (no text, no markdown)
+- NEVER output "REJECTED: ..." or explanations
         """
 
     def __init__(
@@ -215,13 +242,23 @@ REMEMBER: You are a FIXER, not a validator. Output corrected content (or origina
             tools=[],  # Validators must have NO tools
             output_key=f"{name}_format_validation_feedback",
             instruction=f"""
-CRITICAL: You are a FORMAT VALIDATOR, NOT a content generator. Your ONLY job is to output a single word or a short rejection line.
+═══════════════════════════════════════════════════════════
+CRITICAL: YOU ARE A FORMAT VALIDATOR - NOT A CONTENT GENERATOR
+═══════════════════════════════════════════════════════════
 
 YOUR ONLY TWO ALLOWED OUTPUTS:
-1. The word "APPROVED" (if format is correct)
-2. "REJECTED: <one-line issue>" (if format has problems)
+1. The single word: APPROVED
+2. The text: REJECTED: <one-line issue>
 
-DO NOT EVER output JSON, code, explanations, or anything else. ONLY "APPROVED" or "REJECTED: <issue>".
+═══════════════════════════════════════════════════════════
+ABSOLUTELY FORBIDDEN - NEVER EVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ Do NOT output JSON (```json{{...}}```)
+❌ Do NOT output code blocks
+❌ Do NOT output explanations or sentences
+❌ Do NOT output anything longer than one line
+❌ Do NOT generate corrected versions
+❌ Do NOT use tools
 
 WHAT TO VALIDATE:
 Review the immediately previous agent's output from conversation history.
@@ -237,25 +274,22 @@ VALIDATION CHECKS:
 5. UNIT SCALE: Must include "unit_scale": "millions" and "currency": "USD" (or appropriate) if financial amounts present
 6. CAPEX CONVENTION: All capex values must be POSITIVE numbers (representing cash outflow)
 
-ABSOLUTELY FORBIDDEN:
-- Do NOT generate corrected JSON
-- Do NOT generate alternative outputs
-- Do NOT write code blocks
-- Do NOT ask questions
-- Do NOT explain anything
-- Do NOT use tools
+═══════════════════════════════════════════════════════════
+CORRECT VALIDATOR OUTPUTS:
+═══════════════════════════════════════════════════════════
+✅ "APPROVED"
+✅ "REJECTED: Missing required field 'unit_scale'"
+✅ "REJECTED: capex values are negative instead of positive"
 
-EXAMPLES OF CORRECT VALIDATOR OUTPUT:
-- "APPROVED"
-- "REJECTED: Missing required field 'unit_scale'"
-- "REJECTED: capex values are negative instead of positive"
+═══════════════════════════════════════════════════════════
+WRONG VALIDATOR OUTPUTS - NEVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ ```json{{"corrected": "output"}}``` ← Generating content!
+❌ "Here is the corrected version..." ← Explaining!
+❌ Any multi-line output ← Too long!
+❌ {{"fixed": "data"}} ← Generating JSON!
 
-EXAMPLES OF INCORRECT VALIDATOR OUTPUT (NEVER DO THIS):
-- ```json{{"corrected": "output"}}``` ← WRONG! This is generating content!
-- "Here is the corrected version..." ← WRONG! This is explaining!
-- Any output longer than one line ← WRONG!
-
-YOUR OUTPUT RIGHT NOW:
+YOUR OUTPUT RIGHT NOW (must be ONLY "APPROVED" or "REJECTED: ..."):
             """,
         )
 
@@ -265,13 +299,23 @@ YOUR OUTPUT RIGHT NOW:
             tools=[],  # Validators must have NO tools
             output_key=f"{name}_correctness_validation_feedback",
             instruction=f"""
-CRITICAL: You are a CORRECTNESS VALIDATOR, NOT a content generator. Your ONLY job is to output a single word or a short rejection line.
+═══════════════════════════════════════════════════════════
+CRITICAL: YOU ARE A CORRECTNESS VALIDATOR - NOT A CONTENT GENERATOR
+═══════════════════════════════════════════════════════════
 
 YOUR ONLY TWO ALLOWED OUTPUTS:
-1. The word "APPROVED" (if logically correct)
-2. "REJECTED: <one-line issue>" (if logic has problems)
+1. The single word: APPROVED
+2. The text: REJECTED: <one-line issue>
 
-DO NOT EVER output JSON, code, explanations, or anything else. ONLY "APPROVED" or "REJECTED: <issue>".
+═══════════════════════════════════════════════════════════
+ABSOLUTELY FORBIDDEN - NEVER EVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ Do NOT output JSON (```json{{...}}```)
+❌ Do NOT output code blocks
+❌ Do NOT output explanations or sentences
+❌ Do NOT output anything longer than one line
+❌ Do NOT generate corrected versions
+❌ Do NOT use tools (unless absolutely necessary)
 
 WHAT TO VALIDATE:
 Review the immediately previous agent's output from conversation history.
@@ -286,25 +330,22 @@ VALIDATION CHECKS (based on what's IN the output):
 4. Does data match what was provided earlier in conversation?
 5. SANITY CHECK: For mega-cap companies (AAPL, MSFT, GOOGL, AMZN), if annual revenue is <$100B, likely quarterly data was pulled - REJECT
 
-ABSOLUTELY FORBIDDEN:
-- Do NOT generate corrected JSON
-- Do NOT generate alternative outputs
-- Do NOT write code blocks
-- Do NOT ask questions
-- Do NOT explain anything
-- Do NOT use tools (unless absolutely necessary for simple spot check)
+═══════════════════════════════════════════════════════════
+CORRECT VALIDATOR OUTPUTS:
+═══════════════════════════════════════════════════════════
+✅ "APPROVED"
+✅ "REJECTED: Revenue inconsistent with prior period"
+✅ "REJECTED: Apple annual revenue <$100B suggests quarterly data"
 
-EXAMPLES OF CORRECT VALIDATOR OUTPUT:
-- "APPROVED"
-- "REJECTED: Revenue inconsistent with prior period"
-- "REJECTED: Apple annual revenue <$100B suggests quarterly data"
+═══════════════════════════════════════════════════════════
+WRONG VALIDATOR OUTPUTS - NEVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ ```json{{"corrected": "output"}}``` ← Generating content!
+❌ "The DCF valuation implies..." ← Explaining!
+❌ Any multi-line output ← Too long!
+❌ {{"fixed": "data"}} ← Generating JSON!
 
-EXAMPLES OF INCORRECT VALIDATOR OUTPUT (NEVER DO THIS):
-- ```json{{"corrected": "output"}}``` ← WRONG! This is generating content!
-- "The DCF valuation implies..." ← WRONG! This is explaining!
-- Any output longer than one line ← WRONG!
-
-YOUR OUTPUT RIGHT NOW:
+YOUR OUTPUT RIGHT NOW (must be ONLY "APPROVED" or "REJECTED: ..."):
             """,
         )
 
@@ -314,13 +355,23 @@ YOUR OUTPUT RIGHT NOW:
             tools=[],  # Validators must have NO tools
             output_key=f"{name}_spec_validation_feedback",
             instruction=f"""
-CRITICAL: You are a SPEC VALIDATOR, NOT a content generator. Your ONLY job is to output a single word or a short rejection line.
+═══════════════════════════════════════════════════════════
+CRITICAL: YOU ARE A SPEC VALIDATOR - NOT A CONTENT GENERATOR
+═══════════════════════════════════════════════════════════
 
 YOUR ONLY TWO ALLOWED OUTPUTS:
-1. The word "APPROVED" (if requirements met)
-2. "REJECTED: <one-line issue>" (if requirements not met)
+1. The single word: APPROVED
+2. The text: REJECTED: <one-line issue>
 
-DO NOT EVER output JSON, code, explanations, or anything else. ONLY "APPROVED" or "REJECTED: <issue>".
+═══════════════════════════════════════════════════════════
+ABSOLUTELY FORBIDDEN - NEVER EVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ Do NOT output JSON (```json{{...}}```)
+❌ Do NOT output code blocks
+❌ Do NOT output explanations or sentences
+❌ Do NOT output anything longer than one line
+❌ Do NOT generate corrected versions
+❌ Do NOT use tools
 
 WHAT TO VALIDATE:
 Review the immediately previous agent's output from conversation history.
@@ -333,25 +384,22 @@ VALIDATION CHECKS (based on what agent was supposed to produce):
 2. Are required fields/sections present?
 3. Did it follow the output type (JSON/markdown/etc.)?
 
-ABSOLUTELY FORBIDDEN:
-- Do NOT generate corrected JSON
-- Do NOT generate alternative outputs
-- Do NOT write code blocks
-- Do NOT ask questions
-- Do NOT explain anything
-- Do NOT use tools
+═══════════════════════════════════════════════════════════
+CORRECT VALIDATOR OUTPUTS:
+═══════════════════════════════════════════════════════════
+✅ "APPROVED"
+✅ "REJECTED: Missing required field 'dcf_notes'"
+✅ "REJECTED: Output is markdown instead of JSON"
 
-EXAMPLES OF CORRECT VALIDATOR OUTPUT:
-- "APPROVED"
-- "REJECTED: Missing required field 'dcf_notes'"
-- "REJECTED: Output is markdown instead of JSON"
+═══════════════════════════════════════════════════════════
+WRONG VALIDATOR OUTPUTS - NEVER DO THIS:
+═══════════════════════════════════════════════════════════
+❌ ```json{{"corrected": "output"}}``` ← Generating content!
+❌ "The output should include..." ← Explaining!
+❌ Any multi-line output ← Too long!
+❌ {{"fixed": "data"}} ← Generating JSON!
 
-EXAMPLES OF INCORRECT VALIDATOR OUTPUT (NEVER DO THIS):
-- ```json{{"corrected": "output"}}``` ← WRONG! This is generating content!
-- "The output should include..." ← WRONG! This is explaining!
-- Any output longer than one line ← WRONG!
-
-YOUR OUTPUT RIGHT NOW:
+YOUR OUTPUT RIGHT NOW (must be ONLY "APPROVED" or "REJECTED: ..."):
             """,
         )
 
@@ -382,7 +430,8 @@ YOUR OUTPUT RIGHT NOW:
         validator_count = len(validator_agents)
 
         # Create refiner with dynamic validator count
-        # Refiner needs access to same tools as initial agent
+        # Refiner needs access to same tools as initial agent, plus exit_loop
+        refiner_tools = tools + [FunctionTool(exit_loop)]
         refiner_agent = Agent(
             name=f"{name}_refiner_agent",
             model=agent_model,  # Use same model as initial agent
@@ -391,7 +440,7 @@ YOUR OUTPUT RIGHT NOW:
                 validator_count=validator_count,
             ),
             output_key=output_key,
-            tools=tools,  # Same tools as initial agent
+            tools=refiner_tools,
         )
 
         parallel_critique_team = ParallelAgent(
@@ -405,7 +454,7 @@ YOUR OUTPUT RIGHT NOW:
                 parallel_critique_team,
                 refiner_agent,
             ],
-            max_iterations=2,
+            max_iterations=5,
         )
 
         super().__init__(
