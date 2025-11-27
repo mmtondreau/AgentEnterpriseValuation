@@ -3,7 +3,7 @@
 from google.adk.agents import SequentialAgent
 from google.adk.models.google_llm import Gemini
 from .eodhd_mcp import eodHistoricalData
-from .agent_validator import AgentValidator
+from .agent_validator import AgentValidator, ExtraValidatorSpec
 from google.genai import types
 
 # Retry configuration for Gemini API
@@ -64,14 +64,124 @@ json_model = Gemini(
     retry_options=retry_config,
     generation_config=types.GenerateContentConfig(
         response_mime_type="application/json"
-    )
+    ),
 )
 
+
+# ============================================================================
+# Extra Validator Specifications for Each Agent Stage
+# ============================================================================
+
+# Scoping semantic validator
+scoping_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. ALLOWED ENUMS: valuation_target must be "enterprise_value" or "equity_per_share"; control_perspective must be "control" or "minority".
+2. DATE FORMAT: as_of_date must be "today" or ISO date format (YYYY-MM-DD).
+3. CURRENCY FORMAT: currency must be a valid 3-letter currency code (e.g., USD, EUR, GBP).
+""",
+)
+
+# Data semantic validator
+data_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. SYMBOL PRESENT: resolved_symbol must be non-empty and plausible (not null or "").
+2. MARKET CAP CONSISTENCY: If market_cap, price, and shares_outstanding all present, verify market_cap ≈ price × shares_outstanding within ±10% tolerance.
+3. FINANCIAL YEAR ORDERING: years array must have strictly increasing year values and length 3-5.
+4. MARGIN CONSISTENCY: If ebit_margin present in any year, verify ebit_margin ≈ ebit / revenue within ±0.001 tolerance.
+5. UNITS: Must include "unit_scale": "millions" and "currency" field.
+""",
+)
+
+# Forecast semantic validator
+forecast_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. HORIZON: horizon_years must be 5-7; years array length must match horizon_years.
+2. YEAR INDEXING: year field must be 1..horizon_years with no gaps or duplicates.
+3. REVENUE POSITIVITY: revenue must be > 0 for all years.
+4. MARGIN BOUNDS: ebit_margin must be between -1.0 and 1.0 for all years.
+5. EBIT CONSISTENCY: ebit ≈ revenue × ebit_margin within ±0.001 tolerance for all years.
+6. TAX BOUNDS: tax_rate must be between 0.0 and 0.5 for all years.
+7. NOPAT CONSISTENCY: nopat ≈ ebit × (1 - tax_rate) within ±0.001 tolerance for all years.
+8. DEPRECIATION SIGN: depreciation must be ≥ 0 for all years.
+9. CAPEX SIGN: capex must be > 0 for all years; capex_to_revenue (if present) must be ≥ 0.
+10. WORKING CAPITAL SIGN: allow either sign, but flag if |change_in_working_capital| > 0.5 × |revenue change|.
+11. GROWTH SANITY: revenue growth should not accelerate in last 2 years unless notes justify it.
+""",
+)
+
+# WACC semantic validator
+wacc_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. BOUNDS: cost_of_equity, cost_of_debt, wacc must each be between 0.0 and 0.5.
+2. TERMINAL GROWTH BOUNDS: terminal_growth_rate must be between 0.0 and 0.06.
+3. CRITICAL INEQUALITY: wacc must be > terminal_growth_rate by at least 0.005.
+4. WEIGHTS VALIDITY: If equity_weight and debt_weight present, each must be 0.0-1.0 and sum to 1.0 within ±0.01.
+5. WACC CONSISTENCY: If weights present, verify wacc ≈ equity_weight × cost_of_equity + debt_weight × cost_of_debt × (1 - tax_rate) within ±0.005.
+6. CURRENCY SCALE: Must include unit_scale and currency fields.
+""",
+)
+
+# DCF semantic validator
+dcf_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. FCF CONSISTENCY: For each year, fcf ≈ nopat + depreciation - capex - change_in_working_capital within ±0.1 tolerance.
+2. DISCOUNTING CONSISTENCY: pv_fcf ≈ fcf / (1 + wacc)^year within ±0.1 tolerance.
+3. TERMINAL VALUE CONSISTENCY: terminal_value ≈ (last_fcf × (1 + terminal_growth_rate)) / (wacc - terminal_growth_rate) within ±1.0 tolerance.
+4. PV TERMINAL CONSISTENCY: pv_terminal_value ≈ terminal_value / (1 + wacc)^horizon within ±1.0 tolerance.
+5. EV CONSISTENCY: enterprise_value ≈ sum(pv_fcf) + pv_terminal_value within ±1.0 tolerance.
+6. EQUITY BRIDGE CONSISTENCY: If debt and cash available, equity_value ≈ enterprise_value - total_debt + cash_and_equivalents within ±1.0.
+7. PER SHARE CONSISTENCY: If shares_outstanding available, value_per_share ≈ equity_value / shares_outstanding within ±0.01.
+8. MONOTONIC DISCOUNTING: |pv_fcf| should generally decline with year; warn if it increases significantly.
+9. UNITS: Must include "unit_scale": "millions" and "currency" fields.
+""",
+)
+
+# Multiples semantic validator
+multiples_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. MULTIPLES NON-NEGATIVE: pe, ev_to_revenue, ev_to_ebitda must be ≥ 0 when present (not null).
+2. DIVISION VALIDITY: If earnings or ebitda near zero, the multiple should be null, not huge (reject if >1000).
+3. CONSISTENCY WITH INPUTS: subject_current_multiples should align with market_cap and latest net_income within ±10% when both available.
+4. PEER LIST SIZE: peers_analyzed array length must be 0-3.
+5. PEER MEDIAN: If peers_analyzed non-empty, peer_median_multiples should be present and consistent with peer values.
+6. UNITS: Must include unit_scale and currency fields.
+""",
+)
+
+# Report semantic validator
+report_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. SUMMARY CONSISTENCY: summary.enterprise_value, summary.equity_value, summary.value_per_share must match dcf_result within ±1.0 tolerance.
+2. TARGET ALIGNMENT: summary.valuation_target must match scoping_result.valuation_target exactly.
+3. WORD BUDGET: markdown_report must be under 1500 words (estimate by counting spaces + 1).
+4. NO RAW DATA: markdown_report must not contain large JSON blocks or full data arrays (reject if contains more than 50 consecutive lines of structured data).
+5. UNITS: summary.currency must match scoping_result.currency exactly.
+""",
+)
+
+# ============================================================================
+# Agent Definitions
+# ============================================================================
 
 scoping_agent = AgentValidator(
     name="scoping",
     model=json_model,
     tools=[],
+    extra_validators=[scoping_semantic],
     instruction="""
 You are the Scoping & Clarification Agent in a valuation workflow.
 
@@ -123,6 +233,7 @@ data_agent = AgentValidator(
     name="data",
     model=model,
     tools=[eodHistoricalData],
+    extra_validators=[data_semantic],
     instruction="""
 You are the Data Collection Agent. Use ONLY the eodHistoricalData tools to gather compact inputs for valuation. Do not perform valuation math. Do not return raw API responses.
 
@@ -214,10 +325,23 @@ ALL FINANCIAL AMOUNTS:
     output_key="data_result",
 )
 
+# Normalization semantic validator spec
+normalization_semantic = ExtraValidatorSpec(
+    suffix="semantic",
+    validation_scope="semantic consistency",
+    extra_checks_instruction="""
+1. CAPEX SIGN: capex must be positive and capex_to_revenue must be non-negative.
+2. MARGIN CONSISTENCY: ebit_margin must equal ebit divided by revenue within tolerance (±0.001).
+3. RATIO CONSISTENCY: capex_to_revenue must equal capex divided by revenue within tolerance (±0.001).
+5. UNIT SCALE: Must include "unit_scale": "millions" and "currency": "USD".
+""",
+)
+
 normalization_agent = AgentValidator(
     name="normalization",
     model=json_model,
     tools=[],
+    extra_validators=[normalization_semantic],
     instruction="""
     You are the Normalization & Business Understanding Agent. Do not call tools.
 
@@ -302,6 +426,7 @@ forecast_agent = AgentValidator(
     name="forecast",
     model=json_model,
     tools=[],
+    extra_validators=[forecast_semantic],
     instruction="""
 You are the Forecasting Agent. Build an unlevered operating forecast. Do not call tools and do not do DCF math.
 
@@ -373,6 +498,7 @@ wacc_agent = AgentValidator(
     name="wacc",
     model=model,
     tools=[eodHistoricalData],
+    extra_validators=[wacc_semantic],
     instruction="""
 You are the WACC & Capital Structure Agent. Use tools only to fetch missing data (macro indicators, price, fundamentals). Do not do full valuation here.
 
@@ -439,6 +565,7 @@ dcf_agent = AgentValidator(
     name="dcf",
     model=json_model,
     tools=[],
+    extra_validators=[dcf_semantic],
     instruction="""
 You are the DCF Valuation Agent. Do not call tools.
 
@@ -519,6 +646,7 @@ multiples_agent = AgentValidator(
     name="multiples",
     model=model,
     tools=[eodHistoricalData],
+    extra_validators=[multiples_semantic],
     instruction="""
 You are the Multiples & Sanity Check Agent. Use tools only for compact checks. Do not recompute DCF.
 
@@ -608,6 +736,7 @@ report_agent = AgentValidator(
     name="report",
     model=json_model,
     tools=[],
+    extra_validators=[report_semantic],
     instruction="""
 You are the Report & Explanation Agent. Synthesize all prior outputs into a final valuation and a short explanation. Do not call tools.
 
