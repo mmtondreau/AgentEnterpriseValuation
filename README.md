@@ -14,12 +14,14 @@ An AI agent for enterprise valuation using Google's Agent Development Kit (ADK) 
 This project showcases key features of Google's Agent Development Kit (ADK):
 
 ### 🔄 Sequential Agent Workflow
+
 - **SequentialAgent**: The valuation workflow is implemented as a sequential pipeline of 8 specialized agents
 - Each agent has a focused responsibility (scoping, data collection, normalization, forecasting, WACC, DCF, multiples, reporting)
 - State is automatically passed between agents via `output_key` and input variable references in instruction templates
 - Agents execute in a deterministic order, with each stage building on previous outputs
 
 ### 💾 Memory & State Management
+
 - **PostgreSQL Memory Service**: Custom implementation for long-term memory storage
 - **Automatic State Persistence**: After each agent turn, the session state is saved to PostgreSQL
 - **Session Recovery**: Agents can retrieve and reference past analyses from memory
@@ -27,12 +29,14 @@ This project showcases key features of Google's Agent Development Kit (ADK):
 - Memory allows agents to avoid redundant work by referencing recent analyses (within 24 hours)
 
 ### 🔌 MCP (Model Context Protocol) Integration
+
 - **EODHD MCP Server**: Provides 40+ financial data tools via MCP
 - **McpToolset**: ADK's native MCP integration for seamless tool discovery and execution
 - **Stdio Connection**: Agent connects to MCP server via stdio for reliable communication
 - Tools include: fundamentals data, live prices, historical data, company news, earnings trends, macro indicators
 
 ### ✅ Validation Framework
+
 - **Custom AgentValidator**: Extends ADK's Agent class with semantic validation
 - **Multi-stage Validation**: Each agent output is validated for structural correctness and semantic consistency
 - **Automatic Retry**: Validation failures trigger agent retry with detailed error feedback
@@ -40,19 +44,23 @@ This project showcases key features of Google's Agent Development Kit (ADK):
 - Examples: checks for formula consistency (EBIT = revenue × margin), bounds checking (WACC > terminal growth), unit verification
 
 ### 🧠 Model Configuration
+
 - **Gemini 2.5 Flash**: Used for agents requiring large context windows (2M tokens)
 - **JSON Mode**: Specialized model instances with `response_mime_type="application/json"` for structured output
 - **Retry Configuration**: Exponential backoff with 5 attempts for API resilience
 - **Tool Restrictions**: JSON mode agents cannot use tools (ADK limitation), so model configuration is separated by agent needs
 
 ### 🔁 Potential for Loops & Parallel Agents
+
 While the current implementation uses a sequential workflow, the architecture supports:
+
 - **Loop Agents**: Could implement iterative refinement (e.g., forecast adjustment based on validation feedback)
 - **Parallel Agents**: Could run peer analysis and news gathering concurrently during the multiples stage
 - **Conditional Routing**: Could skip stages based on data availability or user requirements
 - The modular agent structure makes it easy to refactor into more complex orchestration patterns
 
 ### 🗄️ PostgreSQL Service Integration
+
 - **Docker-based Database**: PostgreSQL 15 with pre-configured schema
 - **Async Connection Pool**: Uses asyncpg for high-performance async database operations
 - **SQLAlchemy Models**: Type-safe ORM models for sessions, agent_state, and conversation_history
@@ -111,6 +119,7 @@ docker-compose logs -f
 ```
 
 This will start:
+
 - **PostgreSQL** on `localhost:5432` (database: `agent_state`, user: `postgres`, no password)
 - **EODHD MCP Server** on `localhost:8000`
 
@@ -142,6 +151,7 @@ python -m agententerpriseval
 ```
 
 The agent will:
+
 - Connect to the PostgreSQL database at `localhost:5432`
 - Connect to the EODHD MCP server at `localhost:8000`
 - Execute the financial valuation workflow
@@ -192,6 +202,7 @@ AgentEnterpriseValuation/
 The database stores agent state, sessions, and conversation history.
 
 **Connection Details:**
+
 - Host: `localhost`
 - Port: `5432`
 - Database: `agent_state`
@@ -200,6 +211,7 @@ The database stores agent state, sessions, and conversation history.
 - Connection String: `postgresql://postgres@localhost:5432/agent_state`
 
 **Pre-configured Tables:**
+
 - `sessions` - User session tracking
 - `agent_state` - Agent state snapshots
 - `conversation_history` - Message history with timestamps
@@ -209,6 +221,7 @@ The database stores agent state, sessions, and conversation history.
 Provides financial data tools including fundamentals, news, prices, technical indicators, and more.
 
 **Connection Details:**
+
 - HTTP Mode: `http://localhost:8000`
 - Available Tools: 40+ financial data endpoints
 
@@ -238,6 +251,7 @@ docker-compose down -v
 ### ADK Web UI Features
 
 The ADK Web UI provides:
+
 - **Interactive Chat Interface**: Chat with agents in real-time through a web browser
 - **Session Management**: Persistent sessions stored in PostgreSQL
 - **Long-term Memory**: Agents remember past conversations via the PostgreSQL memory service
@@ -249,17 +263,20 @@ The ADK Web UI provides:
 To create a new agent:
 
 1. Create a new directory under `agents/`:
+
    ```bash
    mkdir -p agents/my_new_agent
    ```
 
 2. Create `agents/my_new_agent/__init__.py`:
+
    ```python
    from .agent import root_agent, app_name
    __all__ = ["root_agent", "app_name"]
    ```
 
 3. Create `agents/my_new_agent/agent.py`:
+
    ```python
    from google.adk.agents import Agent
    from google.adk.models.google_llm import Gemini
@@ -303,6 +320,7 @@ mypy agententerpriseval/
 ### Agent Configuration
 
 All agents use:
+
 - **Model**: Gemini 2.5 Flash Lite (configurable)
 - **State Management**: InMemoryRunner (can be switched to PostgreSQL-backed runner)
 - **Retry Config**: 5 attempts with exponential backoff for API calls
@@ -323,6 +341,7 @@ python -m agententerpriseval
 ```
 
 The agent performs:
+
 - Company data collection and normalization
 - Financial forecasting with multiple scenarios
 - WACC (Weighted Average Cost of Capital) calculation
@@ -371,6 +390,7 @@ curl http://localhost:8000/
 ### Agent Connection Issues
 
 Make sure:
+
 1. Docker services are running: `docker-compose ps`
 2. Environment variables are set in `.env`
 3. Virtual environment is activated: `poetry shell`
@@ -386,8 +406,25 @@ Make sure:
 
 ## License
 
-[Your License Here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Contributing
 
-[Your Contributing Guidelines Here]
+Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+
+### Development Guidelines
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Make your changes and ensure tests pass
+4. Run code quality checks:
+   ```bash
+   black .
+   flake8 .
+   mypy agententerpriseval/
+   ```
+5. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+6. Push to the branch (`git push origin feature/AmazingFeature`)
+7. Open a Pull Request
+
+Please ensure your code follows the existing style and includes appropriate tests and documentation.

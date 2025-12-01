@@ -3,6 +3,7 @@ name = "agententerpriseval"
 version = "0.1.0"
 description = "AI Agent for Enterprise Valuation using Google ADK and EODHD Market Data"
 authors = ["Matthew Tondreau <mmtondreau@gmail.com>"]
+license = "MIT"
 readme = "README.md"
 
 [tool.poetry.dependencies]
