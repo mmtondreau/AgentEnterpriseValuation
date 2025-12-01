@@ -9,6 +9,56 @@ An AI agent for enterprise valuation using Google's Agent Development Kit (ADK) 
 - Dockerized infrastructure for easy deployment
 - Multiple agent architectures (sequential, parallel, loop) for various use cases
 
+## Agent Architecture
+
+This project showcases key features of Google's Agent Development Kit (ADK):
+
+### 🔄 Sequential Agent Workflow
+- **SequentialAgent**: The valuation workflow is implemented as a sequential pipeline of 8 specialized agents
+- Each agent has a focused responsibility (scoping, data collection, normalization, forecasting, WACC, DCF, multiples, reporting)
+- State is automatically passed between agents via `output_key` and input variable references in instruction templates
+- Agents execute in a deterministic order, with each stage building on previous outputs
+
+### 💾 Memory & State Management
+- **PostgreSQL Memory Service**: Custom implementation for long-term memory storage
+- **Automatic State Persistence**: After each agent turn, the session state is saved to PostgreSQL
+- **Session Recovery**: Agents can retrieve and reference past analyses from memory
+- **Conversation History**: Full message history with timestamps stored in the database
+- Memory allows agents to avoid redundant work by referencing recent analyses (within 24 hours)
+
+### 🔌 MCP (Model Context Protocol) Integration
+- **EODHD MCP Server**: Provides 40+ financial data tools via MCP
+- **McpToolset**: ADK's native MCP integration for seamless tool discovery and execution
+- **Stdio Connection**: Agent connects to MCP server via stdio for reliable communication
+- Tools include: fundamentals data, live prices, historical data, company news, earnings trends, macro indicators
+
+### ✅ Validation Framework
+- **Custom AgentValidator**: Extends ADK's Agent class with semantic validation
+- **Multi-stage Validation**: Each agent output is validated for structural correctness and semantic consistency
+- **Automatic Retry**: Validation failures trigger agent retry with detailed error feedback
+- **Schema Enforcement**: JSON schema validation ensures data integrity across the pipeline
+- Examples: checks for formula consistency (EBIT = revenue × margin), bounds checking (WACC > terminal growth), unit verification
+
+### 🧠 Model Configuration
+- **Gemini 2.5 Flash**: Used for agents requiring large context windows (2M tokens)
+- **JSON Mode**: Specialized model instances with `response_mime_type="application/json"` for structured output
+- **Retry Configuration**: Exponential backoff with 5 attempts for API resilience
+- **Tool Restrictions**: JSON mode agents cannot use tools (ADK limitation), so model configuration is separated by agent needs
+
+### 🔁 Potential for Loops & Parallel Agents
+While the current implementation uses a sequential workflow, the architecture supports:
+- **Loop Agents**: Could implement iterative refinement (e.g., forecast adjustment based on validation feedback)
+- **Parallel Agents**: Could run peer analysis and news gathering concurrently during the multiples stage
+- **Conditional Routing**: Could skip stages based on data availability or user requirements
+- The modular agent structure makes it easy to refactor into more complex orchestration patterns
+
+### 🗄️ PostgreSQL Service Integration
+- **Docker-based Database**: PostgreSQL 15 with pre-configured schema
+- **Async Connection Pool**: Uses asyncpg for high-performance async database operations
+- **SQLAlchemy Models**: Type-safe ORM models for sessions, agent_state, and conversation_history
+- **Connection String**: Configurable via environment variables for different deployment scenarios
+- **Data Persistence**: Survives agent restarts and enables analysis continuity across sessions
+
 ## Prerequisites
 
 - Python 3.11+
