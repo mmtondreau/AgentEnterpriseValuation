@@ -1,5 +1,6 @@
 """Financial Assistant Agent for analyzing stocks using EODHD data."""
 
-from .agent import root_agent, agent, app_name, eodHistoricalData
+from .agent import root_agent, agent, app_name
+from .eodhd_mcp import eodHistoricalData
 
 __all__ = ["root_agent", "agent", "app_name", "eodHistoricalData"]

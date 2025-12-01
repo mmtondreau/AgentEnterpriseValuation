@@ -1,6 +1,6 @@
-# Google ADK Playground
+# Agent Enterprise Valuation
 
-A playground for experimenting with Google's Agent Development Kit (ADK) integrated with the EODHD (EOD Historical Data) Market Context Protocol (MCP) server. Build AI agents using Google's Gemini models for financial data analysis and other tasks.
+An AI agent for enterprise valuation using Google's Agent Development Kit (ADK) integrated with the EODHD (EOD Historical Data) Market Context Protocol (MCP) server. Performs comprehensive DCF (Discounted Cash Flow) valuations with multiple validation stages using Google's Gemini models.
 
 ## Features
 
@@ -25,7 +25,7 @@ A playground for experimenting with Google's Agent Development Kit (ADK) integra
 ```bash
 # Clone the repository
 git clone <your-repo-url>
-cd GoogleADKPlayground
+cd AgentEnterpriseValuation
 
 # Install dependencies using Poetry
 poetry install
@@ -88,28 +88,38 @@ Run the legacy CLI version:
 
 ```bash
 # Run the main application (currently runs stocks.py)
-python -m googleadkplayground
+python -m agententerpriseval
 ```
 
 The agent will:
 - Connect to the PostgreSQL database at `localhost:5432`
 - Connect to the EODHD MCP server at `localhost:8000`
-- Execute the financial analysis workflow
+- Execute the financial valuation workflow
 
 ## Project Structure
 
 ```
-GoogleADKPlayground/
+AgentEnterpriseValuation/
 ├── agents/                       # ADK agents directory
-│   └── financial_assistant/      # Financial analysis agent
+│   └── financial_assistant/      # Financial valuation agent
 │       ├── __init__.py           # Agent module initialization
-│       ├── agent.py              # Agent definition
+│       ├── agent.py              # Main workflow orchestrator
+│       ├── scoping_agent.py      # Scoping & clarification
+│       ├── data_agent.py         # Data collection
+│       ├── normalization_agent.py # Business normalization
+│       ├── forecast_agent.py     # Financial forecasting
+│       ├── wacc_agent.py         # WACC calculation
+│       ├── dcf_agent.py          # DCF valuation
+│       ├── multiples_agent.py    # Multiples analysis
+│       ├── report_agent.py       # Report generation
+│       ├── agent_validator.py    # Validation framework
+│       ├── eodhd_mcp.py          # EODHD MCP integration
 │       └── README.md             # Agent documentation
 ├── services/                     # Shared services
 │   ├── __init__.py
 │   └── postgres_memory_service.py # PostgreSQL memory service
-├── googleadkplayground/          # Legacy CLI application code
-│   ├── stocks.py                 # Original agent implementation
+├── agententerpriseval/           # CLI application code
+│   ├── stocks.py                 # Agent runner
 │   └── __main__.py              # Entry point for CLI mode
 ├── EODHD_MCP_server/            # EODHD MCP server (cloned submodule)
 ├── conf/                        # Hydra configuration files
@@ -220,11 +230,11 @@ To create a new agent:
 
 ### Running Different Agents
 
-The main entry point is configured in `googleadkplayground/__main__.py`:
+The main entry point is configured in `agententerpriseval/__main__.py`:
 
 ```bash
-# Currently runs stocks.py (legacy CLI mode)
-python -m googleadkplayground
+# Currently runs stocks.py (CLI mode)
+python -m agententerpriseval
 ```
 
 ### Code Quality
@@ -237,7 +247,7 @@ black .
 flake8 .
 
 # Type checking
-mypy googleadkplayground/
+mypy agententerpriseval/
 ```
 
 ### Agent Configuration
@@ -249,9 +259,9 @@ All agents use:
 
 ## Examples
 
-### Financial Analysis Agent (stocks.py)
+### Financial Valuation Agent (stocks.py)
 
-Analyzes stocks using EODHD data:
+Performs comprehensive enterprise valuations using EODHD data:
 
 ```python
 # The agent connects to:
@@ -259,15 +269,16 @@ Analyzes stocks using EODHD data:
 # 2. EODHD MCP server for financial data tools
 # 3. Gemini API for AI processing
 
-python -m googleadkplayground
+python -m agententerpriseval
 ```
 
-The agent can:
-- Fetch company fundamentals
-- Analyze historical prices
-- Get real-time news
-- Calculate technical indicators
-- Generate investment insights
+The agent performs:
+- Company data collection and normalization
+- Financial forecasting with multiple scenarios
+- WACC (Weighted Average Cost of Capital) calculation
+- DCF (Discounted Cash Flow) valuation
+- Multiples analysis and peer comparison
+- Comprehensive valuation report generation
 
 ## Troubleshooting
 

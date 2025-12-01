@@ -1,7 +1,7 @@
 import os
 import dotenv
 import asyncio
-import googleadkplayground.stocks as stocks
+import agententerpriseval.stocks as stocks
 
 dotenv.load_dotenv()
 

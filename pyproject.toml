@@ -1,7 +1,7 @@
 [tool.poetry]
-name = "googleadkplayground"
+name = "agententerpriseval"
 version = "0.1.0"
-description = ""
+description = "AI Agent for Enterprise Valuation using Google ADK and EODHD Market Data"
 authors = ["Matthew Tondreau <mmtondreau@gmail.com>"]
 readme = "README.md"
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository is a playground for experimenting with Google's Agent Development Kit (ADK) and integrating with the EODHD (EOD Historical Data) Market Context Protocol (MCP) server. It contains examples of building AI agents using Google's Gemini models with various architectures (sequential, parallel, loop) for tasks like essay writing and financial data analysis.
+This repository contains an AI agent for enterprise valuation using Google's Agent Development Kit (ADK) and integrating with the EODHD (EOD Historical Data) Market Context Protocol (MCP) server. The agent performs comprehensive DCF (Discounted Cash Flow) valuations with multiple validation stages including data collection, normalization, forecasting, WACC calculation, and multiples analysis.
 
 ## Development Setup
 
@@ -34,14 +34,14 @@ EODHD_API_KEY=your_eodhd_api_key
 
 ```bash
 # Run the main application (currently configured to run stocks.py)
-python -m googleadkplayground
+python -m agententerpriseval
 ```
 
 ## Code Architecture
 
 ### Main Components
 
-**googleadkplayground/stocks.py** - Financial analysis agent that:
+**agententerpriseval/stocks.py** - Financial analysis agent that:
 
 - Connects to EODHD MCP server via stdio connection
 - Uses McpToolset to expose financial data tools (fundamentals, news, prices, etc.)
@@ -81,12 +81,13 @@ black .
 flake8 .
 
 # Type checking
-mypy googleadkplayground/
+mypy agententerpriseval/
 ```
 
 ## Important Notes
 
 - The stocks.py agent has a hardcoded absolute path to the EODHD MCP server - update this when running on different machines
-- Essay writer uses Gemini 2.5 Flash Lite model for cost efficiency
+- The valuation workflow uses Gemini 2.5 Flash for handling large context accumulation
 - All agents use `run_debug()` or `run()` methods with hardcoded user_id="debug_user" and session_id="debug_session"
 - The conf/local.yml file is a Hydra configuration for Google API key management (currently minimal)
+- Agent definitions are now modularized in separate files under `agents/financial_assistant/`
